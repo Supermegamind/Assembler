@@ -1,0 +1,450 @@
+bits 64
+
+extern fopen
+extern fprintf
+extern fclose
+extern printf
+extern scanf
+extern log
+extern cos
+extern fabs
+extern fputs
+
+section .data
+msg1:
+ db "Input x ", 10, 0
+msg2:
+ db "Input precision", 10, 0
+msg3:
+ db "Error open file", 10, 0
+msg5:
+ db "Filename too long", 10, 0
+msg6:
+ db "The value of x modulo must be less than 1", 10, 0
+msg7:
+ db "Input alpha", 10, 0
+form:
+    db "%lf", 0 ;двойная точность
+
+write_char:     db 'wt', 0 ; the mode for fopen
+ofd:            dq  0  ; output file descriptor
+
+msg9:        db      "ln (1 - 2 * x * cos(alpha) + x^2)=%.10g", 10, 0
+msg10:
+        db      "Myln(1 - 2 * x * cos(alpha) + x^2)=%.10g", 10, 0
+
+outfile_format: db  "%.10g:%.20g", 10, 0
+
+one  dq 1.0
+mtwo dq -2.0
+zero dq 0.0
+hh   dq 0.7
+
+section .text
+
+x   equ 8
+y   equ x+8
+e   equ y+8
+a   equ e+8  
+
+
+
+global main
+main:
+    push    rbp
+    mov     rbp, rsp
+    sub     rsp, a   
+    and     rsp, -16
+    
+;тут считываем имя файла из аргументов коммандной строки
+readfilename:
+    mov     r12, rdi ;rdi = argc (argument count)
+    mov     r13, rsi ;rsi = argv (starting address of argument vector)
+
+    cmp     r12, 1 ;если не ввели название файла
+    je      ef2
+
+    mov     rbx, 1                  ; получаем первый аргумент коммандной строки
+    mov     rdi, qword [r13+rbx*8]  ; адрес начала имени файла
+
+
+; IN:  rdi - start addr of zero string
+; OUT: rdx - length of string
+    call    strLen ; вызываем алгоритм для расчета длина имени файла
+    cmp rdx, 255 ;длина названия файла
+    jae ef1
+
+;тут пытаемся открыть файл для записи, если не получилось, идем на вывод ошибки и выходим из программы
+openfile:
+    mov     rsi, write_char ;открыт для записи
+    xor     rax, rax
+    call fopen ;открываем файл rsi-флаги доступа к файлу режим открытия
+    cmp rax, 0 ; check for null
+    jle ef2
+    mov [ofd], rax ; получаем файловый дескриптор(целочисленное значение для идентификации открытого файла или устройства)
+    ;вывод на экран сообщения "Введите значение x" + считывание + проверка, меньше ли 1 по модулю
+
+
+enterx:
+    mov edi, msg1
+    xor eax, eax
+    call printf;аргумент в edi
+
+    ;считывание x
+    mov edi, form
+    lea rsi, [rbp-x];вычисление адреса -приемник -источник
+    xor eax, eax
+    call    scanf
+    ;тут проверка
+    movsd  xmm0, [rbp-x]
+    call   fabs   ; xmm0=|cur_elem|
+    movsd xmm15, xmm0
+    movsd xmm1, [one]
+    ucomisd xmm15, xmm1
+    ja errorx
+
+;вывод на экран сообщения "введите альфа"
+enter_alpha:
+    mov edi, msg7
+    xor eax, eax
+    call printf
+
+read_alpha:
+    mov edi, form
+    lea rsi, [rbp-a]
+    xor eax, eax
+    call    scanf
+
+;вывод на экран сообщения "Введите точность:"
+enterp:
+    mov edi, msg2
+    xor eax, eax
+    call printf
+
+;тут считываем точность
+readp:
+    mov edi, form
+    lea rsi, [rbp-e]
+    xor eax, eax
+    call  scanf
+    jmp prog_start ; если все нормально ввели, то пойдем на начало программы, где уже будут расчеты
+
+
+;ошибка, что |x|>1, тут еще вывод сообщения, что должно быть так|x|<=1
+errorx:
+    ;вывод сообщения про значение
+    mov edi, msg6
+    xor eax, eax
+    call printf
+    jmp enterx
+
+;вывод сообщения, что имя файла слишком длинное
+ef1:
+    mov edi, msg5
+    xor eax, eax
+    call printf
+    jmp exit
+
+;какая-то другая ошибка
+ef2:
+    mov edi, msg3
+    xor eax, eax
+    call printf
+    jmp exit
+
+prog_start:
+    ;тут расчет через вызов
+    movsd xmm0, [rbp-a] ; alpha
+    call cos ; xmm0 = cos(alpha)
+    movsd xmm3, xmm0 ; xmm3 = cos(alpha)
+    
+    movsd xmm4, [rbp-x] ;xmm4 = x
+    mulsd xmm3, [rbp-x] ; xmm3 = x * cos(alpha)
+    mulsd xmm3, [mtwo] ; xmm3 = - 2 * x *cos(alpha)
+    addsd xmm3, [one] ;xmm3 = 1 - 2 * x *cos(alpha)
+    mulsd xmm4, xmm4 ;x^2
+    addsd xmm3, xmm4 ; xmm3 = 1 - 2 * x *cos(alpha) + x^2
+    movsd xmm0, xmm3; xmm0 = 1 - 2 * x *cos(alpha) + x^2
+    call log ; xmm0 = ln (1 - 2 * x *cos(alpha) + x^2)
+
+    ; вывод результата на экран
+    movsd [rbp-y], xmm0
+    mov rdi, msg9
+    ;movsd xmm1, [rbp-y]
+    mov rax, 1
+    call printf
+
+    ; тут мой расчет
+    movsd xmm13, [rbp-e]
+    movsd xmm3, [rbp-a]
+    movsd xmm0, [rbp-x]
+    call myln
+
+    ; вывод результата на экран
+    movsd [rbp-y], xmm0
+    mov rdi, msg10
+    ;movsd xmm1, [rbp-y]
+    mov rax, 1
+    call printf
+    
+    jmp exit
+
+
+
+
+
+
+;тут основной код для расчета+каждое полученное промежуточное значение надо записывать в файл
+myln:
+    movsd xmm2, [rbp-x] ; x
+    movsd xmm3, [rbp-a] ; alpha
+    movsd xmm5, [zero] ; сумма
+    movsd xmm6, [one] ; знаменатель
+    movsd xmm7, [rbp-x] ; x в какой-то степени
+    movsd xmm8, [zero] ; текущий член
+    movsd xmm9, [zero] ; n *alpha
+    movsd xmm10, [one] ; счетчик n
+    movsd xmm11, [mtwo] ; -2
+    movsd xmm12, [one]
+    movsd xmm13, [rbp-e] ; точность
+
+
+.new_term:
+    movsd xmm9, [rbp-a] ; alpha xmm3  ; alpha
+    mulsd xmm9, xmm10 ; xmm9 = alpha * n
+    movsd xmm0, xmm9  ; xmm0 = alpha * n
+    
+    call  cos_alpha          ; xmm0= cos(alpha * n)
+    
+    movsd xmm8, xmm0  ; xmm8= cos(alpha * n)
+    
+    ;movsd xmm4, xmm0 ; DEBUG
+    
+    mulsd xmm8, xmm7  ; xmm8 = cos(alpha * n) * x^n
+    mulsd xmm7, [rbp-x] ; xmm7 = x^n
+    ;mulsd xmm6, xmm10 ; xmm6 = xmm6 * n (типо факториал)
+    divsd xmm8, xmm10 ; делим на этот факториал n!
+    mulsd xmm8, [mtwo] ; xmm8 = -2 * cos(alpha * n) * x^n / n!
+    movsd xmm0, xmm8 ; xmm0 = -2 * cos(alpha * n) * x^n / n!
+    
+    call func_abs
+    ;тут мы добавляем новый член в сумму и сравниваем, поменялось ли что-то
+
+    ucomisd xmm0, xmm13 ;сравнили новый член и точность
+    jb end_ln ;если новый член меньше точности, то конец нашим расчетам
+
+    
+    movsd   xmm0, xmm10      ; xmm10 = n
+    movsd   xmm1, xmm8   ;xmm8- tekushiy elem
+
+    ;movsd   xmm1,xmm4 ; DEBUG
+
+    call write_to_file
+
+    ;записали, вернулись
+    addsd xmm5, xmm8 ;в текущую сумму добавили новый
+    addsd xmm10, xmm12 ;n+=1
+
+    jmp .new_term ;если новый член больше точности, то все норм
+
+
+;теперь записываем результат наших расчетов в xmm0 и возвращаемся
+end_ln:
+
+    movsd  xmm0, xmm5
+    ret
+
+
+
+
+
+
+
+
+;выход из программы
+exit:
+; fclose(fp);
+    mov     rdi, [ofd]
+    call fclose
+    leave
+    xor eax, eax
+    ret
+
+
+
+
+_xmm1 equ 8
+_xmm2 equ _xmm1+8
+_xmm3 equ _xmm2+8
+_xmm5 equ _xmm3+8
+_xmm6 equ _xmm5+8
+_xmm7 equ _xmm6+8
+_xmm8 equ _xmm7+8
+_xmm9 equ _xmm8+8
+_xmm10 equ _xmm9+8
+_xmm11 equ _xmm10+8
+_xmm12 equ _xmm11+8
+_xmm13 equ _xmm12+8
+
+cos_alpha:
+    push    rbp
+    mov     rbp, rsp
+    sub     rsp, _xmm13
+    and     rsp, -16
+
+    movsd   [rbp-_xmm1], xmm1
+    movsd   [rbp-_xmm2], xmm2
+    movsd   [rbp-_xmm3], xmm3
+
+    movsd   [rbp-_xmm5], xmm5
+    movsd   [rbp-_xmm6], xmm6
+    movsd   [rbp-_xmm7], xmm7
+    movsd   [rbp-_xmm8], xmm8
+    movsd   [rbp-_xmm9], xmm9
+    movsd   [rbp-_xmm10], xmm10
+    movsd   [rbp-_xmm11], xmm11
+    movsd   [rbp-_xmm12], xmm12
+    movsd   [rbp-_xmm13], xmm13
+        
+    call cos
+    
+    movsd   xmm1, [rbp-_xmm1]
+    movsd   xmm2, [rbp-_xmm2]
+    movsd   xmm3, [rbp-_xmm3]
+
+    movsd   xmm5, [rbp-_xmm5]
+    movsd   xmm6, [rbp-_xmm6]
+    movsd   xmm7, [rbp-_xmm7]
+    movsd   xmm8, [rbp-_xmm8]
+    movsd  xmm9, [rbp-_xmm9]
+    movsd  xmm10,   [rbp-_xmm10]
+    movsd  xmm11,  [rbp-_xmm11]
+    movsd  xmm12, [rbp-_xmm12]
+    movsd   xmm13, [rbp-_xmm13]
+
+    leave ;восстановление регистров rsp, rbp  
+        
+    ret
+
+
+
+
+
+func_abs:
+    push    rbp
+    mov     rbp, rsp
+    sub     rsp, _xmm13
+    and     rsp, -16
+
+    movsd   [rbp-_xmm1], xmm1
+    movsd   [rbp-_xmm2], xmm2
+    movsd   [rbp-_xmm3], xmm3
+
+    movsd   [rbp-_xmm5], xmm5
+    movsd   [rbp-_xmm6], xmm6
+    movsd   [rbp-_xmm7], xmm7
+    movsd   [rbp-_xmm8], xmm8
+    movsd   [rbp-_xmm9], xmm9
+    movsd   [rbp-_xmm10], xmm10
+    movsd   [rbp-_xmm11], xmm11
+    movsd   [rbp-_xmm12], xmm12
+    movsd   [rbp-_xmm13], xmm13
+        
+    call fabs
+        
+    movsd   xmm1, [rbp-_xmm1]
+    movsd   xmm2, [rbp-_xmm2]
+    movsd   xmm3, [rbp-_xmm3]
+
+    movsd   xmm5, [rbp-_xmm5]
+    movsd   xmm6, [rbp-_xmm6]
+    movsd   xmm7, [rbp-_xmm7]
+    movsd   xmm8, [rbp-_xmm8]
+    movsd  xmm9, [rbp-_xmm9]
+    movsd  xmm10,   [rbp-_xmm10]
+    movsd  xmm11,  [rbp-_xmm11]
+    movsd  xmm12, [rbp-_xmm12]
+    movsd   xmm13, [rbp-_xmm13]
+
+    leave ;восстановление регистров rsp, rbp  
+            
+    ret
+
+
+
+
+
+write_to_file:
+    push    rbp
+    mov     rbp, rsp
+    sub     rsp, _xmm13
+    and     rsp, -16
+
+    movsd   [rbp-_xmm1], xmm1
+    movsd   [rbp-_xmm2], xmm2
+    movsd   [rbp-_xmm3], xmm3
+
+    movsd   [rbp-_xmm5], xmm5
+    movsd   [rbp-_xmm6], xmm6
+    movsd   [rbp-_xmm7], xmm7
+    movsd   [rbp-_xmm8], xmm8
+    movsd   [rbp-_xmm9], xmm9
+    movsd   [rbp-_xmm10], xmm10
+    movsd   [rbp-_xmm11], xmm11
+    movsd   [rbp-_xmm12], xmm12
+    movsd   [rbp-_xmm13], xmm13
+
+
+    mov    rdi, [ofd]
+    mov    rsi, outfile_format    ; '%.10g'
+    mov    rax, 2       ; xmm0,xmm1 сколько регистров будет задействовано
+    call   fprintf       ; fprintf("%.10g=%.10g", n, res)
+
+
+    movsd   xmm1, [rbp-_xmm1]
+    movsd   xmm2, [rbp-_xmm2]
+    movsd   xmm3, [rbp-_xmm3]
+
+    movsd   xmm5, [rbp-_xmm5]
+    movsd   xmm6, [rbp-_xmm6]
+    movsd   xmm7, [rbp-_xmm7]
+    movsd   xmm8, [rbp-_xmm8]
+    movsd  xmm9, [rbp-_xmm9]
+    movsd  xmm10,   [rbp-_xmm10]
+    movsd  xmm11,  [rbp-_xmm11]
+    movsd  xmm12, [rbp-_xmm12]
+    movsd   xmm13, [rbp-_xmm13]
+
+    leave ;восстановление регистров rsp, rbp
+    ret
+
+
+
+
+
+; -----
+; алгоритм для расчета длины названия файла
+; IN:  rdi - start addr of zero string
+; OUT: rdx - length of string
+strLen:
+    push    rbp
+    mov     rbp, rsp
+
+    push    rbx
+
+    mov     rbx, rdi
+    mov     rdx, 0
+
+strCountLoop:
+    cmp     byte [rbx], 0
+    je      strCountDone
+    inc     rdx
+    inc     rbx
+    jmp     strCountLoop
+
+strCountDone:
+    pop rbx
+    leave
+    ret
+    ;print $xmm
+
